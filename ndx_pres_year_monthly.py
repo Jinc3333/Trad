@@ -1,9 +1,9 @@
 """
-대통령 임기 연차별 × 월별  일봉 평균 수익률 꺾은선 그래프
-- 4개 선: 1년차 / 2년차 / 3년차 / 4년차
-- X축: 1~12월 (달력 기준)
-- Y축: 해당 (연차, 월) 구간 일봉 수익률의 평균 (%)
-- 총 48 포인트 + 95% 신뢰구간 음영
+대통령 임기 연차별 × 월별  48개 서브플롯
+- 4행(1~4년차) × 12열(1~12월) = 48개 그래프
+- 각 그래프 X축: 해당 월의 일(1~31일)
+- 각 그래프 Y축: 그 날짜 일봉 수익률의 대통령 평균 (%)
+- 누적수익선(0 기준) + 95% CI 음영
 """
 
 import warnings; warnings.filterwarnings('ignore')
@@ -28,7 +28,7 @@ def setup_korean_font():
 
 setup_korean_font()
 
-# ── 대통령 임기 정의 ──────────────────────────────────────────────────────────
+# ── 대통령 임기 ───────────────────────────────────────────────────────────────
 PRESIDENTS = [
     ('Reagan',     '1985-01-20', '1989-01-20', 2, 'R'),
     ('G.H.W.Bush', '1989-01-20', '1993-01-20', 1, 'R'),
@@ -53,161 +53,97 @@ raw = pd.read_csv(DATA_CSV, index_col='Date', parse_dates=True)
 raw.index = pd.to_datetime(raw.index).tz_localize(None)
 raw = raw[['Close']].rename(columns={'Close': 'close'}).dropna()
 raw = raw[raw.index <= TODAY]
-raw['ret'] = raw['close'].pct_change() * 100   # 일간 수익률 (%)
+raw['ret'] = raw['close'].pct_change() * 100
 
-# ── 각 일봉에 (연차, 월) 태그 부착 ───────────────────────────────────────────
+# ── 각 일봉에 (연차, 월, 일) 태그 부착 ──────────────────────────────────────
 rows = []
 for _, prow in PRES_DF.iterrows():
     p_start = prow['start']
-
     for yr_n in range(1, 5):
         yr_s = p_start + pd.DateOffset(years=yr_n - 1)
         yr_e = min(p_start + pd.DateOffset(years=yr_n), TODAY)
         if yr_s >= TODAY:
             break
-
-        seg = raw[(raw.index > yr_s) & (raw.index < yr_e)].copy()
-        # pct_change 첫날(취임일 다음)은 정상 포함
-        seg = seg.dropna(subset=['ret'])
+        seg = raw[(raw.index > yr_s) & (raw.index < yr_e)].dropna(subset=['ret']).copy()
         seg['yr_n']  = yr_n
         seg['month'] = seg.index.month
-        rows.append(seg[['ret', 'yr_n', 'month']])
+        seg['day']   = seg.index.day
+        rows.append(seg[['ret', 'yr_n', 'month', 'day']])
 
 df = pd.concat(rows, ignore_index=True)
 print(f"총 일봉 수: {len(df):,}개")
 
-# ── 집계: (연차, 월) → 일봉 평균 & 95% CI ────────────────────────────────────
-agg = (df.groupby(['yr_n', 'month'])['ret']
+# ── (연차, 월, 일) → 평균·CI 집계 ───────────────────────────────────────────
+agg = (df.groupby(['yr_n', 'month', 'day'])['ret']
          .agg(mean='mean', std='std', n='count')
          .reset_index())
 agg['se']   = agg['std'] / np.sqrt(agg['n'])
 agg['ci95'] = agg['se'] * 1.96
 
-# ── 콘솔 출력 ─────────────────────────────────────────────────────────────────
+# ── 시각화: 4행 × 12열 = 48 서브플롯 ────────────────────────────────────────
 MONTH_KR = ['1월','2월','3월','4월','5월','6월',
             '7월','8월','9월','10월','11월','12월']
-YR_LABEL = ['1년차','2년차','3년차','4년차']
+YR_LABEL  = ['1년차','2년차','3년차','4년차']
+COLORS    = {1:'#E74C3C', 2:'#3498DB', 3:'#2ECC71', 4:'#F39C12'}
+DARK      = '#2C3E50'
+LIGHT     = '#F0F3F7'
 
-print(f"\n[ 연차별 월 평균 일봉 수익률 (%) — 샘플 수 ]")
-cnt_tbl = agg.pivot(index='yr_n', columns='month', values='n').fillna(0).astype(int)
-cnt_tbl.index = YR_LABEL
-cnt_tbl.columns = MONTH_KR
-print(cnt_tbl.to_string())
-
-print(f"\n[ 연차별 월 평균 일봉 수익률 (%) ]")
-hdr = f"{'':>5}" + "".join(f"{m:>8}" for m in MONTH_KR)
-print(hdr)
-print("-" * (5 + 8*12))
-for yr in range(1, 5):
-    row_str = f"{YR_LABEL[yr-1]:>5}"
-    for m in range(1, 13):
-        val = agg[(agg['yr_n']==yr) & (agg['month']==m)]['mean']
-        row_str += f"  {val.values[0]:+5.3f}%" if len(val) else "      N/A"
-    print(row_str)
-
-# ── 시각화 ────────────────────────────────────────────────────────────────────
-COLORS = {1: '#E74C3C', 2: '#3498DB', 3: '#2ECC71', 4: '#F39C12'}
-DARK   = '#2C3E50'
-LIGHT  = '#F0F3F7'
-
-fig, axes = plt.subplots(2, 1, figsize=(16, 14),
-                         gridspec_kw={'height_ratios': [2.6, 1]})
+fig, axes = plt.subplots(4, 12, figsize=(48, 16),
+                          gridspec_kw={'hspace': 0.55, 'wspace': 0.35})
 fig.patch.set_facecolor(LIGHT)
 
-# ─── 메인 꺾은선 ──────────────────────────────────────────────────────────────
-ax = axes[0]
-ax.set_facecolor('#FDFEFE')
-ax.axhline(0, color=DARK, lw=1.2, zorder=2)
-
-x = np.arange(1, 13)
-
 for yr in range(1, 5):
-    sub   = agg[agg['yr_n'] == yr].set_index('month').reindex(x)
-    means = sub['mean'].values
-    ci    = sub['ci95'].values
-    col   = COLORS[yr]
-    lbl   = YR_LABEL[yr-1]
-    cnt   = sub['n'].values
+    for mo in range(1, 13):
+        ax = axes[yr-1][mo-1]
+        ax.set_facecolor('#FDFEFE')
 
-    ax.fill_between(x, means - ci, means + ci,
-                    color=col, alpha=0.13, zorder=1)
-    ax.plot(x, means, color=col, lw=2.4, marker='o', ms=7,
-            label=lbl, zorder=4,
-            markeredgecolor='white', markeredgewidth=1.2)
-
-    for xi, (y, n) in enumerate(zip(means, cnt)):
-        if np.isnan(y):
+        sub = agg[(agg['yr_n']==yr) & (agg['month']==mo)].sort_values('day')
+        if sub.empty:
+            ax.axis('off')
             continue
-        offset = 0.018 if y >= 0 else -0.022
-        ax.text(xi + 1, y + offset,
-                f"{y:+.3f}%",
-                ha='center',
-                va='bottom' if y >= 0 else 'top',
-                fontsize=7.5, color=col, fontweight='bold')
 
-ax.set_xticks(x)
-ax.set_xticklabels(MONTH_KR, fontsize=11)
-ax.set_ylabel("평균 일봉 수익률 (%)", fontsize=11)
-ax.set_xlim(0.35, 12.65)
-ax.legend(fontsize=12, loc='upper right', framealpha=0.9)
-ax.grid(axis='y', linestyle='--', alpha=0.35)
-ax.set_title(
-    "대통령 임기 연차별 × 월별  평균 일봉 수익률  (나스닥100, 1985~2026)\n"
-    "음영 = 95% 신뢰구간  |  각 포인트 = 해당 연차 전체 대통령 일봉 평균",
-    fontsize=13, fontweight='bold', color=DARK, pad=14)
+        days  = sub['day'].values
+        means = sub['mean'].values
+        ci    = sub['ci95'].values
+        col   = COLORS[yr]
 
-# ─── 하단 요약 테이블 ─────────────────────────────────────────────────────────
-ax2 = axes[1]
-ax2.set_facecolor('#FDFEFE')
-ax2.axis('off')
+        ax.axhline(0, color='#95A5A6', lw=0.8, zorder=1)
+        ax.fill_between(days, means - ci, means + ci,
+                        color=col, alpha=0.18, zorder=2)
+        ax.plot(days, means, color=col, lw=1.4,
+                marker='o', ms=2.2, zorder=3,
+                markeredgecolor='white', markeredgewidth=0.5)
 
-table_data = []
-row_labels = []
+        # X축: 1, 10, 20, 31만 표시
+        xticks = [d for d in [1, 10, 20, 31] if d in days]
+        ax.set_xticks(xticks)
+        ax.set_xticklabels([str(d) for d in xticks], fontsize=6)
+        ax.tick_params(axis='y', labelsize=6)
+
+        # Y축 범위 대칭
+        ylim = max(abs(means - ci).max(), abs(means + ci).max(), 0.3)
+        ax.set_ylim(-ylim * 1.3, ylim * 1.3)
+
+        # 서브플롯 제목
+        ax.set_title(f"{YR_LABEL[yr-1]} {MONTH_KR[mo-1]}",
+                     fontsize=8, fontweight='bold',
+                     color=col, pad=3)
+
+        ax.grid(axis='y', linestyle=':', alpha=0.4)
+        ax.spines[['top','right']].set_visible(False)
+
+# 행 라벨 (좌측)
 for yr in range(1, 5):
-    row = []
-    row_labels.append(YR_LABEL[yr-1])
-    for m in range(1, 13):
-        v = agg[(agg['yr_n']==yr) & (agg['month']==m)]['mean']
-        row.append(f"{v.values[0]:+.3f}%" if len(v) else "N/A")
-    table_data.append(row)
+    axes[yr-1][0].set_ylabel(YR_LABEL[yr-1], fontsize=10,
+                              fontweight='bold', color=COLORS[yr],
+                              labelpad=6)
 
-tbl = ax2.table(
-    cellText=table_data,
-    rowLabels=row_labels,
-    colLabels=MONTH_KR,
-    cellLoc='center', rowLoc='center',
-    loc='center',
-    bbox=[0.0, 0.05, 1.0, 0.88]
-)
-tbl.auto_set_font_size(False)
-tbl.set_fontsize(9.5)
-
-for (r, c), cell in tbl.get_celld().items():
-    cell.set_edgecolor('#BDC3C7')
-    cell.set_height(0.22)
-    if r == 0:
-        cell.set_facecolor('#2C3E50')
-        cell.set_text_props(color='white', fontweight='bold')
-    elif c == -1:
-        cell.set_facecolor(COLORS.get(r, '#ECF0F1'))
-        cell.set_text_props(color='white', fontweight='bold')
-    else:
-        try:
-            val = float(table_data[r-1][c-1].replace('%','').replace('+',''))
-            intensity = min(abs(val) / 0.15, 0.7)   # ±0.15%를 최대 채도 기준
-            if val >= 0:
-                cell.set_facecolor((1 - intensity*0.15, 1, 1 - intensity*0.15, 1))
-            else:
-                cell.set_facecolor((1, 1 - intensity*0.15, 1 - intensity*0.15, 1))
-        except Exception:
-            cell.set_facecolor('#FDFEFE')
-
-ax2.set_title("평균 일봉 수익률 요약 테이블", fontsize=11,
-              fontweight='bold', color=DARK, pad=8)
-
-plt.tight_layout(pad=1.5)
+plt.suptitle(
+    "나스닥100 × 대통령 임기 연차별 월별 일봉 평균 수익률  (1985~2026)\n"
+    "각 포인트 = 해당 연차의 역대 대통령 동일 날짜 일봉 평균  |  음영 = 95% CI",
+    fontsize=15, fontweight='bold', color=DARK, y=1.01)
 
 out_png = "/home/user/Trad/ndx_pres_year_monthly.png"
-fig.savefig(out_png, dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor())
+fig.savefig(out_png, dpi=120, bbox_inches='tight', facecolor=fig.get_facecolor())
 plt.close(fig)
-print(f"\n차트 저장: {out_png}")
+print(f"차트 저장: {out_png}")
