@@ -96,7 +96,8 @@ if __name__ == '__main__':
     json_path = os.path.join(DIR, 'seasonality_data.json')
     if not os.path.exists(json_path):
         print('seasonality_data.json 생성 중...')
-        os.system(f'{sys.executable} {os.path.join(DIR, "gen_seasonality_json.py")}')
+        import subprocess
+        subprocess.run([sys.executable, os.path.join(DIR, 'gen_seasonality_json.py')], check=True)
 
     server = HTTPServer(('0.0.0.0', PORT), Handler)
     print(f'🚀  http://localhost:{PORT}  (Ctrl+C 종료)')
