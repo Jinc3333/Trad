@@ -1,9 +1,9 @@
 """
 대통령 임기 연차별 × 월별  48개 서브플롯
 - 4행(1~4년차) × 12열(1~12월) = 48개 그래프
-- 각 그래프 X축: 해당 월의 일(1~31일)
-- 각 그래프 Y축: 그 날짜 일봉 수익률의 대통령 평균 (%)
-- 누적수익선(0 기준) + 95% CI 음영
+- 각 그래프 X축: 해당 월의 달력 날짜 (1~31일)
+- 각 그래프 Y축: 월 첫 거래일 = 0%, 이후 누적 가격변화율 (%)
+- 역대 대통령 평균 + 95% CI 음영
 """
 
 import warnings; warnings.filterwarnings('ignore')
@@ -55,8 +55,9 @@ raw = raw[['Close']].rename(columns={'Close': 'close'}).dropna()
 raw = raw[raw.index <= TODAY]
 raw['ret'] = raw['close'].pct_change() * 100
 
-# ── 각 일봉에 (연차, 월, 일) 태그 부착 ──────────────────────────────────────
-rows = []
+# ── 각 (대통령, 연차, 월) 구간의 월내 누적수익률 계산 ──────────────────────
+# 각 occurrence: 해당 월의 첫 거래일 = 0%, 이후 달력일 기준 누적 %
+records = []
 for _, prow in PRES_DF.iterrows():
     p_start = prow['start']
     for yr_n in range(1, 5):
@@ -64,17 +65,27 @@ for _, prow in PRES_DF.iterrows():
         yr_e = min(p_start + pd.DateOffset(years=yr_n), TODAY)
         if yr_s >= TODAY:
             break
-        seg = raw[(raw.index > yr_s) & (raw.index < yr_e)].dropna(subset=['ret']).copy()
-        seg['yr_n']  = yr_n
-        seg['month'] = seg.index.month
-        seg['day']   = seg.index.day
-        rows.append(seg[['ret', 'yr_n', 'month', 'day']])
+        seg = raw[(raw.index > yr_s) & (raw.index < yr_e)].copy()
 
-df = pd.concat(rows, ignore_index=True)
-print(f"총 일봉 수: {len(df):,}개")
+        for mo in range(1, 13):
+            m_data = seg[seg.index.month == mo].sort_index()
+            if len(m_data) < 5:
+                continue
+            base = m_data['close'].iloc[0]           # 첫 거래일 기준가
+            for ts, row in m_data.iterrows():
+                cum_pct = (row['close'] / base - 1) * 100
+                records.append({
+                    'yr_n':  yr_n,
+                    'month': mo,
+                    'day':   ts.day,
+                    'cum':   cum_pct,
+                })
 
-# ── (연차, 월, 일) → 평균·CI 집계 ───────────────────────────────────────────
-agg = (df.groupby(['yr_n', 'month', 'day'])['ret']
+df = pd.DataFrame(records)
+print(f"총 데이터포인트: {len(df):,}개")
+
+# ── (연차, 월, 달력일) → 평균·CI 집계 ──────────────────────────────────────
+agg = (df.groupby(['yr_n', 'month', 'day'])['cum']
          .agg(mean='mean', std='std', n='count')
          .reset_index())
 agg['se']   = agg['std'] / np.sqrt(agg['n'])
@@ -107,22 +118,30 @@ for yr in range(1, 5):
         ci    = sub['ci95'].values
         col   = COLORS[yr]
 
+        # 0% 기준선
         ax.axhline(0, color='#95A5A6', lw=0.8, zorder=1)
-        ax.fill_between(days, means - ci, means + ci,
-                        color=col, alpha=0.18, zorder=2)
-        ax.plot(days, means, color=col, lw=1.4,
-                marker='o', ms=2.2, zorder=3,
-                markeredgecolor='white', markeredgewidth=0.5)
+        # 첫날(day=1) 명시적으로 0 고정
+        plot_days  = np.concatenate([[days[0]], days])
+        plot_means = np.concatenate([[0], means])
+        plot_ci    = np.concatenate([[0], ci])
 
-        # X축: 1, 10, 20, 31만 표시
-        xticks = [d for d in [1, 10, 20, 31] if d in days]
+        ax.fill_between(plot_days,
+                        plot_means - plot_ci,
+                        plot_means + plot_ci,
+                        color=col, alpha=0.18, zorder=2)
+        ax.plot(plot_days, plot_means, color=col, lw=1.5, zorder=3)
+
+        # X축: 1, 10, 20, 마지막일
+        last_day = int(days[-1])
+        xticks = sorted(set([1, 10, 20, last_day]))
         ax.set_xticks(xticks)
         ax.set_xticklabels([str(d) for d in xticks], fontsize=6)
         ax.tick_params(axis='y', labelsize=6)
 
-        # Y축 범위 대칭
-        ylim = max(abs(means - ci).max(), abs(means + ci).max(), 0.3)
-        ax.set_ylim(-ylim * 1.3, ylim * 1.3)
+        # Y축 범위 대칭 (최소 ±1%)
+        ylim = max(abs(plot_means - plot_ci).max(),
+                   abs(plot_means + plot_ci).max(), 1.0)
+        ax.set_ylim(-ylim * 1.15, ylim * 1.15)
 
         # 서브플롯 제목
         ax.set_title(f"{YR_LABEL[yr-1]} {MONTH_KR[mo-1]}",
