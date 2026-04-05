@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Dashboard</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: #131722; color: #D1D4DC; font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 12px; overflow: hidden; }
+
+/* ── 헤더 ── */
+#header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 14px; height: 38px;
+  background: #1E222D; border-bottom: 1px solid #2A2E39;
+  flex-shrink: 0;
+}
+#header h1 { font-size: 14px; font-weight: 700; color: #FAFAFA; letter-spacing: 0.3px; }
+#header .sep { width: 1px; height: 18px; background: #2A2E39; }
+.tag { padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: 700; }
+.tag-r { background: #2a1520; color: #ef5350; }
+.tag-d { background: #152035; color: #2962FF; }
+#last-upd { margin-left: auto; color: #4f5566; font-size: 11px; }
+
+/* ── 전체 레이아웃 ── */
+#layout {
+  display: flex; flex-direction: column;
+  height: calc(100vh - 38px);
+}
+#top-row {
+  display: grid; grid-template-columns: 63% 37%;
+  flex: 1; min-height: 0; border-bottom: 1px solid #2A2E39;
+}
+
+/* ── 차트 섹션 ── */
+.pane { display: flex; flex-direction: column; min-height: 0; }
+.pane-hdr {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 0 12px; height: 32px;
+  background: #1A1D2B; border-bottom: 1px solid #2A2E39;
+  font-size: 12px;
+}
+.pane-hdr .sym { font-size: 15px; font-weight: 700; color: #FAFAFA; }
+.pane-hdr .sub { color: #4f5566; }
+.pane-hdr .legend { display: flex; gap: 10px; margin-left: auto; }
+.leg-item { display: flex; align-items: center; gap: 5px; color: #787B86; font-size: 10px; }
+.leg-line { width: 14px; height: 2px; border-radius: 1px; }
+
+#qld-pane  { border-right: 1px solid #2A2E39; }
+#qld-wrap  { flex: 1; min-height: 0; }
+#rsi-wrap  { height: 110px; flex-shrink: 0; border-top: 1px solid #2A2E39; }
+.rsi-hdr {
+  padding: 0 12px; height: 22px; line-height: 22px;
+  background: #1A1D2B; border-bottom: 1px solid #2A2E39;
+  color: #787B86; font-size: 10px; flex-shrink: 0;
+}
+#btc-wrap  { flex: 1; min-height: 0; }
+
+/* ── 계절성 섹션 ── */
+#season-row {
+  height: 295px; flex-shrink: 0; display: flex; flex-direction: column;
+}
+#season-ctrl {
+  display: flex; align-items: center; gap: 14px; flex-shrink: 0;
+  padding: 0 14px; height: 36px;
+  background: #1A1D2B; border-bottom: 1px solid #2A2E39; border-top: 1px solid #2A2E39;
+}
+#season-ctrl .ctrl-lbl { color: #787B86; }
+select {
+  background: #252836; color: #D1D4DC; border: 1px solid #3A3E52;
+  border-radius: 4px; padding: 3px 8px; font-size: 12px; cursor: pointer; outline: none;
+}
+select:hover { border-color: #2962FF; }
+#season-wrap { flex: 1; min-height: 0; }
+#season-info { margin-left: auto; color: #4f5566; font-size: 11px; }
+
+/* ── 로딩 ── */
+#loading {
+  position: fixed; inset: 0; background: #131722;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; z-index: 999;
+}
+.spinner {
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 3px solid #2A2E39; border-top-color: #2962FF;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#load-msg { color: #4f5566; }
+
+/* ── 에러 ── */
+#error-box {
+  display: none; position: fixed; inset: 0; background: #131722;
+  align-items: center; justify-content: center; flex-direction: column; gap: 10px; z-index: 999;
+}
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div id="load-msg">데이터 로딩 중…</div>
+</div>
+<div id="error-box">
+  <div style="font-size:22px">⚠️</div>
+  <div id="err-msg" style="color:#ef5350"></div>
+  <div style="color:#4f5566;margin-top:4px">터미널에서 <code style="color:#D1D4DC">python server.py</code> 실행 후 새로고침</div>
+</div>
+
+<div id="header">
+  <h1>📊 Trading Dashboard</h1>
+  <div class="sep"></div>
+  <span id="pres-badge" class="tag"></span>
+  <span id="pres-name" style="color:#9598A1"></span>
+  <span id="last-upd"></span>
+</div>
+
+<div id="layout">
+  <div id="top-row">
+
+    <!-- ── QLD 패널 ── -->
+    <div class="pane" id="qld-pane">
+      <div class="pane-hdr">
+        <span class="sym">QLD</span>
+        <span class="sub">ProShares Ultra QQQ · 일봉</span>
+        <div class="legend">
+          <div class="leg-item"><div class="leg-line" style="background:#E4C97B"></div>200 SMA</div>
+          <div class="leg-item"><div class="leg-line" style="background:#26a69a"></div>×1.3</div>
+          <div class="leg-item"><div class="leg-line" style="background:#ef5350"></div>×0.7</div>
+        </div>
+      </div>
+      <div id="qld-wrap"></div>
+      <div class="rsi-hdr">RSI (14) &nbsp;—&nbsp; 과매수 70 &nbsp;/&nbsp; 과매도 30</div>
+      <div id="rsi-wrap"></div>
+    </div>
+
+    <!-- ── BTC 패널 ── -->
+    <div class="pane">
+      <div class="pane-hdr">
+        <span class="sym">BTC/USDT</span>
+        <span class="sub">Binance · 4시간봉</span>
+      </div>
+      <div id="btc-wrap"></div>
+    </div>
+
+  </div><!-- /top-row -->
+
+  <!-- ── 계절성 패널 ── -->
+  <div id="season-row">
+    <div id="season-ctrl">
+      <span class="sym" style="font-size:13px;font-weight:700;color:#FAFAFA">NDX 계절성 vs 실제</span>
+      <div class="sep"></div>
+      <span class="ctrl-lbl">대통령 연차</span>
+      <select id="yr-sel">
+        <option value="1">1년차</option>
+        <option value="2">2년차</option>
+        <option value="3">3년차</option>
+        <option value="4">4년차</option>
+      </select>
+      <span class="ctrl-lbl">월</span>
+      <select id="mo-sel"></select>
+      <div class="legend" style="gap:14px">
+        <div class="leg-item" style="font-size:11px">
+          <div class="leg-line" style="background:#AB47BC;width:18px"></div>
+          <span style="color:#AB47BC">역사적 평균 (95% CI)</span>
+        </div>
+        <div class="leg-item" style="font-size:11px">
+          <div class="leg-line" style="background:#FF8F00;width:18px"></div>
+          <span style="color:#FF8F00">실제 NDX</span>
+        </div>
+      </div>
+      <span id="season-info"></span>
+    </div>
+    <div id="season-wrap"></div>
+  </div>
+
+</div><!-- /layout -->
+
+<script>
+'use strict';
+const LC = LightweightCharts;
+
+// ── 공통 차트 스타일 ──────────────────────────────────────────────────────────
+const BASE_OPTS = {
+  layout:  { background: { type: 'solid', color: '#131722' }, textColor: '#787B86', fontSize: 11 },
+  grid:    { vertLines: { color: '#1E222D' }, horzLines: { color: '#1E222D' } },
+  crosshair: { mode: LC.CrosshairMode.Normal },
+  rightPriceScale: { borderColor: '#2A2E39' },
+  timeScale: { borderColor: '#2A2E39', timeVisible: true, secondsVisible: false },
+  handleScroll: true, handleScale: true,
+};
+
+// ── 대통령 정보 ───────────────────────────────────────────────────────────────
+const PRESIDENTS = [
+  {name:'Reagan',     start:'1985-01-20',end:'1989-01-20',term:2,party:'R'},
+  {name:'G.H.W.Bush', start:'1989-01-20',end:'1993-01-20',term:1,party:'R'},
+  {name:'Clinton',    start:'1993-01-20',end:'1997-01-20',term:1,party:'D'},
+  {name:'Clinton',    start:'1997-01-20',end:'2001-01-20',term:2,party:'D'},
+  {name:'G.W.Bush',   start:'2001-01-20',end:'2005-01-20',term:1,party:'R'},
+  {name:'G.W.Bush',   start:'2005-01-20',end:'2009-01-20',term:2,party:'R'},
+  {name:'Obama',      start:'2009-01-20',end:'2013-01-20',term:1,party:'D'},
+  {name:'Obama',      start:'2013-01-20',end:'2017-01-20',term:2,party:'D'},
+  {name:'Trump',      start:'2017-01-20',end:'2021-01-20',term:1,party:'R'},
+  {name:'Biden',      start:'2021-01-20',end:'2025-01-20',term:1,party:'D'},
+  {name:'Trump',      start:'2025-01-20',end:'2029-01-20',term:2,party:'R'},
+];
+
+function getCurPres() {
+  const now = Date.now();
+  for (const p of PRESIDENTS) {
+    const s = new Date(p.start).getTime(), e = new Date(p.end).getTime();
+    if (now >= s && now < e) {
+      const yr = Math.min(4, Math.floor((now - s) / (365.25*86400*1000)) + 1);
+      return { ...p, yr_n: yr };
+    }
+  }
+  return null;
+}
+
+// ── 지표 계산 ─────────────────────────────────────────────────────────────────
+function calcSMA(data, period) {
+  const r = [];
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    sum += data[i].close;
+    if (i >= period) sum -= data[i - period].close;
+    if (i >= period - 1) r.push({ time: data[i].time, value: sum / period });
+  }
+  return r;
+}
+
+function calcRSI(data, period = 14) {
+  const r = [];
+  let ag = 0, al = 0;
+  for (let i = 1; i <= period && i < data.length; i++) {
+    const d = data[i].close - data[i-1].close;
+    if (d > 0) ag += d; else al -= d;
+  }
+  ag /= period; al /= period;
+  for (let i = period; i < data.length; i++) {
+    if (i > period) {
+      const d = data[i].close - data[i-1].close;
+      ag = (ag * (period-1) + Math.max(0,  d)) / period;
+      al = (al * (period-1) + Math.max(0, -d)) / period;
+    }
+    const rs = al === 0 ? 100 : ag / al;
+    r.push({ time: data[i].time, value: +(100 - 100/(1+rs)).toFixed(2) });
+  }
+  return r;
+}
+
+// ── QLD + RSI ─────────────────────────────────────────────────────────────────
+let qldChart, rsiChart, btcChart, seasonChart;
+
+function makeChart(el, extraOpts = {}) {
+  const c = LC.createChart(el, {
+    ...BASE_OPTS,
+    width:  el.clientWidth,
+    height: el.clientHeight,
+    ...extraOpts,
+  });
+  new ResizeObserver(() => c.resize(el.clientWidth, el.clientHeight)).observe(el);
+  return c;
+}
+
+function renderQLD(data) {
+  const qldEl = document.getElementById('qld-wrap');
+  qldChart = makeChart(qldEl);
+
+  const candles = qldChart.addCandlestickSeries({
+    upColor: '#26a69a', downColor: '#ef5350',
+    borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+  });
+  candles.setData(data);
+
+  const sma = calcSMA(data, 200);
+  const addLine = (d, color, style = LC.LineStyle.Solid, w = 1.5) => {
+    const s = qldChart.addLineSeries({ color, lineWidth: w, lineStyle: style,
+      lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+    s.setData(d);
+    return s;
+  };
+  addLine(sma, '#E4C97B');
+  addLine(sma.map(p => ({ time: p.time, value: p.value * 1.3 })), '#26a69a88', LC.LineStyle.Dashed, 1.2);
+  addLine(sma.map(p => ({ time: p.time, value: p.value * 0.7 })), '#ef535088', LC.LineStyle.Dashed, 1.2);
+
+  // RSI
+  const rsiEl = document.getElementById('rsi-wrap');
+  rsiChart = makeChart(rsiEl, {
+    rightPriceScale: { borderColor: '#2A2E39', scaleMargins: { top: 0.05, bottom: 0.05 } },
+  });
+  const rsiSeries = rsiChart.addLineSeries({ color: '#2962FF', lineWidth: 1.5,
+    lastValueVisible: true, priceLineVisible: false, title: 'RSI' });
+  rsiSeries.setData(calcRSI(data, 14));
+  rsiSeries.createPriceLine({ price: 70, color: '#ef535066', lineWidth: 1,
+    lineStyle: LC.LineStyle.Dashed, axisLabelVisible: true, title: '70' });
+  rsiSeries.createPriceLine({ price: 30, color: '#26a69a66', lineWidth: 1,
+    lineStyle: LC.LineStyle.Dashed, axisLabelVisible: true, title: '30' });
+
+  // 시간축 동기화
+  const sync = (src, dst) =>
+    src.timeScale().subscribeVisibleLogicalRangeChange(r => { if (r) dst.timeScale().setVisibleLogicalRange(r); });
+  sync(qldChart, rsiChart); sync(rsiChart, qldChart);
+  qldChart.timeScale().fitContent();
+}
+
+// ── BTC 4H ───────────────────────────────────────────────────────────────────
+function renderBTC(data) {
+  const el = document.getElementById('btc-wrap');
+  btcChart = makeChart(el, { timeScale: { ...BASE_OPTS.timeScale, timeVisible: true } });
+
+  const candles = btcChart.addCandlestickSeries({
+    upColor: '#26a69a', downColor: '#ef5350',
+    borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+  });
+  candles.setData(data);
+
+  // 거래량 (보조 스케일)
+  const volSeries = btcChart.addHistogramSeries({
+    color: '#26a69a44', priceFormat: { type: 'volume' },
+    priceScaleId: 'vol',
+  });
+  btcChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+  volSeries.setData(data.map(d => ({
+    time: d.time, value: d.volume,
+    color: d.close >= d.open ? '#26a69a44' : '#ef535044',
+  })));
+
+  btcChart.timeScale().fitContent();
+}
+
+// ── 계절성 차트 ───────────────────────────────────────────────────────────────
+function renderSeasonality(yrn, month, ndxData, seasonData) {
+  const el = document.getElementById('season-wrap');
+  if (seasonChart) { seasonChart.remove(); seasonChart = null; }
+
+  seasonChart = makeChart(el, {
+    rightPriceScale: {
+      borderColor: '#2A2E39',
+      scaleMargins: { top: 0.12, bottom: 0.12 },
+    },
+    localization: { priceFormatter: v => v.toFixed(2) + '%' },
+  });
+
+  const addSeries = (color, w = 1.5, style = LC.LineStyle.Solid, opts = {}) =>
+    seasonChart.addLineSeries({ color, lineWidth: w, lineStyle: style,
+      lastValueVisible: false, priceLineVisible: false,
+      crosshairMarkerVisible: false, ...opts });
+
+  // 0% 기준선
+  const zeroS = addSeries('#2A2E39', 1);
+
+  // 현재 연도 (선택된 월이 과거이면 이전연도 처리)
+  const now = new Date();
+  let year = now.getFullYear();
+  // 선택된 달이 현재 달보다 크면(미래) → 올해, 작거나 같으면 올해
+  // 어떤 경우든 올해 기준으로 x축 날짜 매핑
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const zeroDays = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if (new Date(ds).getMonth() + 1 === month) zeroDays.push({ time: ds, value: 0 });
+  }
+  zeroS.setData(zeroDays);
+
+  // ── 계절성 (역사적 평균 + CI) ──────────────────────────────────────────────
+  const seasonal = seasonData?.[String(yrn)]?.[String(month)] ?? [];
+  if (seasonal.length > 0) {
+    const valid = seasonal.filter(pt => {
+      const ds = `${year}-${String(month).padStart(2,'0')}-${String(pt.day).padStart(2,'0')}`;
+      return new Date(ds).getMonth() + 1 === month;
+    });
+
+    const toTS = pt => `${year}-${String(month).padStart(2,'0')}-${String(pt.day).padStart(2,'0')}`;
+
+    const ciHi = addSeries('#AB47BC44', 1, LC.LineStyle.Dashed);
+    const ciLo = addSeries('#AB47BC44', 1, LC.LineStyle.Dashed);
+    const meanS = addSeries('#AB47BC', 2, LC.LineStyle.Solid,
+      { lastValueVisible: true, crosshairMarkerVisible: true, title: '계절성 평균' });
+
+    ciHi.setData(valid.map(pt => ({ time: toTS(pt), value: pt.ci_high })));
+    ciLo.setData(valid.map(pt => ({ time: toTS(pt), value: pt.ci_low  })));
+    meanS.setData(valid.map(pt => ({ time: toTS(pt), value: pt.mean   })));
+  }
+
+  // ── 실제 NDX 이번 달 ───────────────────────────────────────────────────────
+  const monthNDX = ndxData.filter(d => {
+    const t = new Date(d.time * 1000);
+    return t.getFullYear() === year && t.getMonth() + 1 === month;
+  });
+  if (monthNDX.length > 0) {
+    const base = monthNDX[0].close;
+    const actualData = monthNDX.map(d => {
+      const t = new Date(d.time * 1000);
+      const ds = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+      return { time: ds, value: +((d.close / base - 1) * 100).toFixed(4) };
+    });
+    const actualS = addSeries('#FF8F00', 2, LC.LineStyle.Solid,
+      { lastValueVisible: true, crosshairMarkerVisible: true, title: 'NDX 실제' });
+    actualS.setData(actualData);
+  }
+
+  seasonChart.timeScale().fitContent();
+
+  // 정보 업데이트
+  const MONTH_KR = ['','1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  const YR_LABEL = ['','1년차','2년차','3년차','4년차'];
+  document.getElementById('season-info').textContent =
+    `${YR_LABEL[yrn]} ${MONTH_KR[month]} — 샘플: ${seasonal.length}일 · 실제: ${monthNDX.length}일`;
+}
+
+// ── 유틸 ─────────────────────────────────────────────────────────────────────
+async function fetchJ(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}  ${url}`);
+  return r.json();
+}
+
+// ── 초기화 ────────────────────────────────────────────────────────────────────
+function initMonthSel() {
+  const names = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  const cur = new Date().getMonth() + 1;
+  const sel = document.getElementById('mo-sel');
+  names.forEach((n, i) => {
+    const o = document.createElement('option');
+    o.value = i + 1; o.textContent = n;
+    if (i + 1 === cur) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+async function main() {
+  initMonthSel();
+
+  const cur = getCurPres();
+  if (cur) {
+    document.getElementById('yr-sel').value = String(cur.yr_n);
+    const badge = document.getElementById('pres-badge');
+    badge.textContent = cur.party === 'R' ? '공화당' : '민주당';
+    badge.className = 'tag ' + (cur.party === 'R' ? 'tag-r' : 'tag-d');
+    document.getElementById('pres-name').textContent =
+      `${cur.name} ${cur.term === 2 ? '재선' : '초선'} ${cur.yr_n}년차`;
+  }
+
+  document.getElementById('load-msg').textContent = 'QLD · BTC · NDX 데이터 수신 중…';
+
+  try {
+    const [qld, btc, ndx, seasonData] = await Promise.all([
+      fetchJ('/api/qld?range=2y'),
+      fetchJ('/api/btc'),
+      fetchJ('/api/ndx?range=1y'),
+      fetchJ('/api/seasonality'),
+    ]);
+
+    document.getElementById('loading').style.display = 'none';
+
+    renderQLD(qld);
+    renderBTC(btc);
+
+    const getYr = () => parseInt(document.getElementById('yr-sel').value);
+    const getMo = () => parseInt(document.getElementById('mo-sel').value);
+    renderSeasonality(getYr(), getMo(), ndx, seasonData);
+
+    document.getElementById('last-upd').textContent =
+      '업데이트 ' + new Date().toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit' });
+
+    const update = () => renderSeasonality(getYr(), getMo(), ndx, seasonData);
+    document.getElementById('yr-sel').addEventListener('change', update);
+    document.getElementById('mo-sel').addEventListener('change', update);
+
+  } catch (e) {
+    document.getElementById('loading').style.display = 'none';
+    const eb = document.getElementById('error-box');
+    eb.style.display = 'flex';
+    document.getElementById('err-msg').textContent = e.message;
+  }
+}
+
+main();
+</script>
+</body>
+</html>
